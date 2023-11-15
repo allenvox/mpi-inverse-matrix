@@ -3,8 +3,6 @@ DIRGUARD = @mkdir -p $(@D)
 CFLAGS = -Wall -Wextra -Werror
 CXX = mpicxx
 CXXFLAGS = -pedantic -std=c++17
-CXXSRC = $(wildcard src/*.cpp)
-CXXEXEC = $(patsubst src/%.cpp,bin/%,$(CXXSRC))
 
 UNAME = $(shell uname)
 ifeq ($(UNAME), Darwin)
@@ -12,9 +10,9 @@ ifeq ($(UNAME), Darwin)
 endif
 
 .PHONY: all
-all: $(CXXEXEC)
+all: bin/main
 
-bin/%: src/%.cpp
+bin/main: src/main.cpp
 	$(DIRGUARD)
 	$(CXX) $(CFLAGS) $(CXXFLAGS) -o $@ $<
 
