@@ -21,7 +21,7 @@ int size_from_file(const string &path) {
   return n;
 }
 
-void Input(int skolko, double **a, int otkuda, const char *name) {
+void get_matrix(int skolko, double **a, int otkuda, const char *name) {
   int n;
   double p;
   // each proc gets equal amount of continuous rows
@@ -76,7 +76,7 @@ void print_matrix(int n, double **a) {
 // diagonalising matrix & getting inverse from connected matrix
 // transferring data between procs takes O(n) memspace
 // function zeroes k-th col except diagonal elem, choosing main elem for row
-int Inv(int n, double **a, double **x, int k) {
+int inverse_matrix(int n, double **a, double **x, int k) {
   // arrays for transferring data between procs
   double *ms = new double[n];
   double *mf = new double[n];
@@ -270,7 +270,7 @@ int main(int argc, char **argv) {
   }
 
   // get input matrix
-  Input(skolko, a, otkuda, argv[min(skolko, 100 * (otkuda - 1) * otkuda)]);
+  get_matrix(skolko, a, otkuda, argv[min(skolko, 100 * (otkuda - 1) * otkuda)]);
 
   MPI_Barrier(MPI_COMM_WORLD);
   if (me == 0) {
@@ -279,7 +279,7 @@ int main(int argc, char **argv) {
 
   // find inverse matrix, diagonalise each col
   for (int i = 0; i < n; i++) {
-    int result = Inv(n, a, x, i);
+    int result = inverse_matrix(n, a, x, i);
     if (result == -1) {
       cout << "No inverse matrix\n";
       for (int j = 0; j < n / num; j++) {
