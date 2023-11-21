@@ -9,7 +9,7 @@
 #include <iostream>
 
 using namespace std;
-int me, num;
+int rank, commsize;
 
 enum { VOID_INPUT, FORMULA_INPUT, FILE_INPUT };
 
@@ -27,11 +27,11 @@ void get_matrix(int skolko, double **a, int otkuda, const char *name) {
   // each proc gets equal amount of continuous rows
   if (otkuda == 1) {
     n = skolko;
-    for (int i = 0; i < n / num; i++) {
+    for (int i = 0; i < n / commsize; i++) {
       for (int j = 0; j < n; j++) {
         // proc's n-th row = matrix's (i + rank * n / commsize)-th row
         // 1 / (1 + i + rank * n / commsize + j)
-        a[i][j] = min(n - j, n - i - me * n / num);
+        a[i][j] = min(n - j, n - i - rank * n / commsize);
       }
     }
   }
@@ -39,13 +39,13 @@ void get_matrix(int skolko, double **a, int otkuda, const char *name) {
     ifstream f(name);
     f >> n;
     // ignore rows before his own rows
-    for (int i = 0; i < me * n / num; i++) {
+    for (int i = 0; i < rank * n / commsize; i++) {
       for (int j = 0; j < n; j++) {
         f >> p;
       }
     }
     // get his own rows
-    for (int i = 0; i < n / num; i++) {
+    for (int i = 0; i < n / commsize; i++) {
       for (int j = 0; j < n; j++) {
         f >> a[i][j];
       }
@@ -61,13 +61,13 @@ void print_matrix(int n, double **a) {
     // sync all procs before outputting next row
     MPI_Barrier(MPI_COMM_WORLD);
     // each proc outputs his own rows
-    if (me == k) {
+    if (rank == k) {
       for (int j = 0; j < min(n, 6); j++) {
-        cout << setw(12) << a[i - me * n / num][j];
+        cout << setw(12) << a[i - rank * n / commsize][j];
       }
       cout << '\n';
     }
-    if (i - k * n / num == n / num - 1) {
+    if (i - k * n / commsize == n / commsize - 1) {
       k++;
     }
   }
@@ -84,13 +84,13 @@ int inverse_matrix(int n, double **a, double **x, int k) {
   for (int i = 0; i < n; i++) {
     ms[i] = 0.0;
   }
-  for (int i = me * n / num; i < (me + 1) * n / num; i++) {
-    ms[i] = a[i - me * n / num][k];
+  for (int i = rank * n / commsize; i < (rank + 1) * n / commsize; i++) {
+    ms[i] = a[i - rank * n / commsize][k];
   }
 
   // procs sum ms cols to mf col => mf = current col
   MPI_Barrier(MPI_COMM_WORLD);
-  for (int i = 0; i < num; i++) {
+  for (int i = 0; i < commsize; i++) {
     MPI_Reduce(ms, mf, n, MPI_DOUBLE, MPI_SUM, i, MPI_COMM_WORLD);
   }
   MPI_Barrier(MPI_COMM_WORLD);
@@ -109,8 +109,8 @@ int inverse_matrix(int n, double **a, double **x, int k) {
   if (fabs(mf[M]) < 1e-7)
     return -1;
 
-  int t1 = k / (n / num); // proc w/ row that's number = diagonalised col number
-  int t2 = M / (n / num); // proc w/ main elem
+  int t1 = k / (n / commsize); // p w/ row that's number = diagonalised col number
+  int t2 = M / (n / commsize); // p w/ main elem
 
   // new arrays for transferring data
   double *s1 = new double[4 * n];
@@ -120,23 +120,23 @@ int inverse_matrix(int n, double **a, double **x, int k) {
   }
 
   // proc with diagonal element puts needed rows to arrays
-  if (me == t1) {
+  if (rank == t1) {
     for (int i = n; i < 2 * n; i++) {
-      s1[i] = a[k - me * n / num][i - n];
-      s1[i + 2 * n] = x[k - me * n / num][i - n];
+      s1[i] = a[k - rank * n / commsize][i - n];
+      s1[i + 2 * n] = x[k - rank * n / commsize][i - n];
     }
   }
 
   // proc with main elem puts needed rows to arrays
-  if (me == t2)
+  if (rank == t2)
     for (int i = 0; i < n; i++) {
-      s1[i] = a[M - me * n / num][i];
-      s1[i + 2 * n] = x[M - me * n / num][i];
+      s1[i] = a[M - rank * n / commsize][i];
+      s1[i + 2 * n] = x[M - rank * n / commsize][i];
     }
 
   // sum all arrays to s2
   MPI_Barrier(MPI_COMM_WORLD);
-  for (int i = 0; i < num; i++) {
+  for (int i = 0; i < commsize; i++) {
     MPI_Reduce(s1, s2, 4 * n, MPI_DOUBLE, MPI_SUM, i, MPI_COMM_WORLD);
   }
   MPI_Barrier(MPI_COMM_WORLD);
@@ -149,23 +149,23 @@ int inverse_matrix(int n, double **a, double **x, int k) {
   }
 
   // procs with main elem and diagonal elem swap rows
-  if (me == t2) {
+  if (rank == t2) {
     for (int i = n; i < 2 * n; i++) {
-      a[M - me * n / num][i - n] = s2[i];
-      x[M - me * n / num][i - n] = s2[i + 2 * n];
+      a[M - rank * n / commsize][i - n] = s2[i];
+      x[M - rank * n / commsize][i - n] = s2[i + 2 * n];
     }
   }
-  if (me == t1) {
+  if (rank == t1) {
     for (int i = 0; i < n; i++) {
-      a[k - me * n / num][i] = s2[i];
-      x[k - me * n / num][i] = s2[i + 2 * n];
+      a[k - rank * n / commsize][i] = s2[i];
+      x[k - rank * n / commsize][i] = s2[i + 2 * n];
     }
   }
 
   // all procs subtract diagonal row from their rows
   // (zeroing working col except diagonal elem)
-  for (int i = 0; i < n / num; i++) {
-    if (i + me * n / num != k) {
+  for (int i = 0; i < n / commsize; i++) {
+    if (i + rank * n / commsize != k) {
       c = a[i][k];
       for (int j = 0; j < n; j++) {
         a[i][j] = a[i][j] - s2[j] * c;
@@ -180,8 +180,8 @@ int inverse_matrix(int n, double **a, double **x, int k) {
 
 int main(int argc, char **argv) {
   MPI_Init(&argc, &argv);
-  MPI_Comm_size(MPI_COMM_WORLD, &num);
-  MPI_Comm_rank(MPI_COMM_WORLD, &me);
+  MPI_Comm_size(MPI_COMM_WORLD, &commsize);
+  MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
   int n, t;
   ifstream input;
@@ -237,16 +237,16 @@ int main(int argc, char **argv) {
   }
 
   // each proc gets equal amount of rows
-  double **a = new double *[n / num];
-  double **x = new double *[n / num];
-  for (int i = 0; i < n / num; i++) {
+  double **a = new double *[n / commsize];
+  double **x = new double *[n / commsize];
+  for (int i = 0; i < n / commsize; i++) {
     a[i] = new double[n];
     x[i] = new double[n];
   }
   // each proc fills its chunk of connected matrix
-  for (int i = 0; i < n / num; i++) {
+  for (int i = 0; i < n / commsize; i++) {
     for (int j = 0; j < n; j++) {
-      if (i + me * n / num == j) {
+      if (i + rank * n / commsize == j) {
         x[i][j] = 1.0;
       } else {
         x[i][j] = 0.0;
@@ -254,26 +254,11 @@ int main(int argc, char **argv) {
     }
   }
 
-  if (!(a && x)) {
-    cout << "Not enough memory!\n";
-    if (a) {
-      for (int i = 0; i < n / num; i++)
-        delete[] a[i];
-      delete[] a;
-    }
-    if (x) {
-      for (int i = 0; i < n / num; i++)
-        delete[] x[i];
-      delete[] x;
-    }
-    return -3;
-  }
-
   // get input matrix
   get_matrix(skolko, a, otkuda, argv[min(skolko, 100 * (otkuda - 1) * otkuda)]);
 
   MPI_Barrier(MPI_COMM_WORLD);
-  if (me == 0) {
+  if (rank == 0) {
     startwtime = MPI_Wtime();
   }
 
@@ -282,7 +267,7 @@ int main(int argc, char **argv) {
     int result = inverse_matrix(n, a, x, i);
     if (result == -1) {
       cout << "No inverse matrix\n";
-      for (int j = 0; j < n / num; j++) {
+      for (int j = 0; j < n / commsize; j++) {
         delete[] a[j];
         delete[] x[j];
       }
@@ -292,18 +277,18 @@ int main(int argc, char **argv) {
     }
   }
 
-  if (me == 0) {
+  if (rank == 0) {
     endwtime = MPI_Wtime();
   }
 
   // MPI_Barrier(MPI_COMM_WORLD);
   // print_matrix(n, x);
   MPI_Barrier(MPI_COMM_WORLD);
-  if (me == 0) {
+  if (rank == 0) {
     cout << "elapsed " << endwtime - startwtime << " sec\n";
   }
 
-  for (int i = 0; i < n / num; i++) {
+  for (int i = 0; i < n / commsize; i++) {
     delete[] a[i];
     delete[] x[i];
   }
