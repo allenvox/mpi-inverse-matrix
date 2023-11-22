@@ -4,9 +4,9 @@
 #include <iomanip>
 #include <iostream>
 
-int rank, commsize;
+int n, rank, commsize;
 
-void get_matrix(int n, double **a) {
+void get_matrix(double **a) {
   // each proc gets equal amount of continuous rows
   for (int i = 0; i < n / commsize; i++) {
     for (int j = 0; j < n; j++) {
@@ -17,7 +17,7 @@ void get_matrix(int n, double **a) {
   }
 }
 
-void print_matrix(int n, double **a) {
+void print_matrix(double **a) {
   int k = 0;
   // output only first 6 rows & cols
   for (int i = 0; i < std::min(n, 6); i++) {
@@ -39,7 +39,7 @@ void print_matrix(int n, double **a) {
 // diagonalising matrix & getting inverse from connected matrix
 // transferring data between procs takes O(n) memspace
 // function zeroes k-th col except diagonal elem, choosing main elem for row
-int inverse_matrix(int n, double **a, double **x, int k) {
+int inverse_matrix(double **a, double **x, int k) {
   // arrays for transferring data between procs
   double *ms = new double[n];
   double *mf = new double[n];
@@ -69,11 +69,11 @@ int inverse_matrix(int n, double **a, double **x, int k) {
   delete[] mf;
 
   // if main element is close to 0, matrix got no inverse
-  if (std::fabs(mf[M]) < 1e-7) {
+  if (std::fabs(mf[M]) == 0) { // < 1e-7) {
     return -1;
   }
 
-  int t1 = k / (n / commsize); // p w/ row that's number = diagonalised col number
+  int t1 = k / (n / commsize); // p w/ n-th row, n is diagonalised col number
   int t2 = M / (n / commsize); // p w/ main elem
 
   // new arrays for transferring data
@@ -92,11 +92,12 @@ int inverse_matrix(int n, double **a, double **x, int k) {
   }
 
   // proc with main elem puts needed rows to arrays
-  if (rank == t2)
+  if (rank == t2) {
     for (int i = 0; i < n; i++) {
       s1[i] = a[M - rank * n / commsize][i];
       s1[i + 2 * n] = x[M - rank * n / commsize][i];
     }
+  }
 
   // sum all arrays to s2
   MPI_Barrier(MPI_COMM_WORLD);
@@ -146,8 +147,6 @@ int main(int argc, char **argv) {
   MPI_Init(&argc, &argv);
   MPI_Comm_size(MPI_COMM_WORLD, &commsize);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
-
-  int n;
   if (argc > 1) {
     n = std::atoi(argv[1]);
   } else {
@@ -173,14 +172,15 @@ int main(int argc, char **argv) {
   }
 
   // get input matrix
-  get_matrix(n, a);
+  get_matrix(a);
+  // print_matrix(a);
 
   MPI_Barrier(MPI_COMM_WORLD);
   double t = -MPI_Wtime();
 
   // find inverse matrix, diagonalise each col
   for (int i = 0; i < n; i++) {
-    int result = inverse_matrix(n, a, x, i);
+    int result = inverse_matrix(a, x, i);
     if (result == -1) {
       std::cout << "No inverse matrix\n";
       for (int j = 0; j < n / commsize; j++) {
@@ -196,7 +196,7 @@ int main(int argc, char **argv) {
   t += MPI_Wtime();
 
   // MPI_Barrier(MPI_COMM_WORLD);
-  // print_matrix(n, x);
+  // print_matrix(x);
   MPI_Barrier(MPI_COMM_WORLD);
   if (rank == 0) {
     std::cout << "n = " << n << ", t = " << t << " sec\n";
