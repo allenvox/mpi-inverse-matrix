@@ -1,71 +1,34 @@
 #include <mpi.h>
 
 #include <cmath>
-#include <cstdio>
-#include <cstdlib>
-#include <cstring>
-#include <fstream>
 #include <iomanip>
 #include <iostream>
 
-using namespace std;
 int rank, commsize;
 
-enum { VOID_INPUT, FORMULA_INPUT, FILE_INPUT };
-
-int size_from_file(const string &path) {
-  int n = 2;
-  ifstream ff(path);
-  ff >> n;
-  ff.close();
-  return n;
-}
-
-void get_matrix(int skolko, double **a, int otkuda, const char *name) {
-  int n;
-  double p;
+void get_matrix(int n, double **a) {
   // each proc gets equal amount of continuous rows
-  if (otkuda == 1) {
-    n = skolko;
-    for (int i = 0; i < n / commsize; i++) {
-      for (int j = 0; j < n; j++) {
-        // proc's n-th row = matrix's (i + rank * n / commsize)-th row
-        // 1 / (1 + i + rank * n / commsize + j)
-        a[i][j] = min(n - j, n - i - rank * n / commsize);
-      }
+  for (int i = 0; i < n / commsize; i++) {
+    for (int j = 0; j < n; j++) {
+      // proc's n-th row = matrix's (i + rank * n / commsize)-th row
+      // 1 / (1 + i + rank * n / commsize + j)
+      a[i][j] = std::min(n - j, n - i - rank * n / commsize);
     }
-  }
-  if (otkuda == 2) {
-    ifstream f(name);
-    f >> n;
-    // ignore rows before his own rows
-    for (int i = 0; i < rank * n / commsize; i++) {
-      for (int j = 0; j < n; j++) {
-        f >> p;
-      }
-    }
-    // get his own rows
-    for (int i = 0; i < n / commsize; i++) {
-      for (int j = 0; j < n; j++) {
-        f >> a[i][j];
-      }
-    }
-    f.close();
   }
 }
 
 void print_matrix(int n, double **a) {
   int k = 0;
   // output only first 6 rows & cols
-  for (int i = 0; i < min(n, 6); i++) {
+  for (int i = 0; i < std::min(n, 6); i++) {
     // sync all procs before outputting next row
     MPI_Barrier(MPI_COMM_WORLD);
     // each proc outputs his own rows
     if (rank == k) {
-      for (int j = 0; j < min(n, 6); j++) {
-        cout << setw(12) << a[i - rank * n / commsize][j];
+      for (int j = 0; j < std::min(n, 6); j++) {
+        std::cout << std::setw(12) << a[i - rank * n / commsize][j];
       }
-      cout << '\n';
+      std::cout << '\n';
     }
     if (i - k * n / commsize == n / commsize - 1) {
       k++;
@@ -98,7 +61,7 @@ int inverse_matrix(int n, double **a, double **x, int k) {
   // find main element in col
   int M = k;
   for (int i = k + 1; i < n; i++) {
-    if (fabs(mf[i]) > fabs(mf[M])) {
+    if (std::fabs(mf[i]) > std::fabs(mf[M])) {
       M = i;
     }
   }
@@ -106,8 +69,9 @@ int inverse_matrix(int n, double **a, double **x, int k) {
   delete[] mf;
 
   // if main element is close to 0, matrix got no inverse
-  if (fabs(mf[M]) < 1e-7)
+  if (std::fabs(mf[M]) < 1e-7) {
     return -1;
+  }
 
   int t1 = k / (n / commsize); // p w/ row that's number = diagonalised col number
   int t2 = M / (n / commsize); // p w/ main elem
@@ -183,57 +147,11 @@ int main(int argc, char **argv) {
   MPI_Comm_size(MPI_COMM_WORLD, &commsize);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
 
-  int n, t;
-  ifstream input;
-  double startwtime, endwtime;
-  unsigned int skolko = 2, otkuda = 4;
-
-  for (int i = 1; i < argc; i++) {
-    if (argv[i][0] == '-' && argv[i][1] == 'm' && argv[i][2] == '\0') {
-      otkuda = FORMULA_INPUT;
-    }
-    if (argv[i][0] == '-' && argv[i][1] == 'f' && argv[i][2] == '\0') {
-      otkuda = FILE_INPUT;
-    }
-  }
-  if (otkuda == 4) {
-    cout << "-m <size> - generate by formula\n-f <filepath> - get from file\n";
-    return -1;
-  }
-
-  if (otkuda == FORMULA_INPUT) {
-    for (int i = 1; i < argc; i++) {
-      t = 0;
-      skolko = 0;
-      for (int j = 0; j < (int)strlen(argv[i]); j++) {
-        skolko = skolko * 10 + int(argv[i][j]) - 48;
-        if (int(argv[i][j]) < 48 || int(argv[i][j]) > 57) {
-          t = 1;
-        }
-      }
-      if (t == 0) {
-        break;
-      }
-    }
-    if (t == 1) {
-      skolko = 2;
-    }
-    n = skolko;
-  }
-
-  if (otkuda == FILE_INPUT) {
-    t = 0;
-    for (int i = 1; i < argc; i++) {
-      if (ifstream(argv[i])) {
-        skolko = i;
-        n = size_from_file(argv[i]);
-        t = 1;
-      }
-    }
-    if (t == 0) {
-      cout << "Filepath not specified\n";
-      return -2;
-    }
+  int n;
+  if (argc > 1) {
+    n = std::atoi(argv[1]);
+  } else {
+    n = 1000;
   }
 
   // each proc gets equal amount of rows
@@ -255,18 +173,16 @@ int main(int argc, char **argv) {
   }
 
   // get input matrix
-  get_matrix(skolko, a, otkuda, argv[min(skolko, 100 * (otkuda - 1) * otkuda)]);
+  get_matrix(n, a);
 
   MPI_Barrier(MPI_COMM_WORLD);
-  if (rank == 0) {
-    startwtime = MPI_Wtime();
-  }
+  double t = -MPI_Wtime();
 
   // find inverse matrix, diagonalise each col
   for (int i = 0; i < n; i++) {
     int result = inverse_matrix(n, a, x, i);
     if (result == -1) {
-      cout << "No inverse matrix\n";
+      std::cout << "No inverse matrix\n";
       for (int j = 0; j < n / commsize; j++) {
         delete[] a[j];
         delete[] x[j];
@@ -277,15 +193,13 @@ int main(int argc, char **argv) {
     }
   }
 
-  if (rank == 0) {
-    endwtime = MPI_Wtime();
-  }
+  t += MPI_Wtime();
 
   // MPI_Barrier(MPI_COMM_WORLD);
   // print_matrix(n, x);
   MPI_Barrier(MPI_COMM_WORLD);
   if (rank == 0) {
-    cout << "elapsed " << endwtime - startwtime << " sec\n";
+    std::cout << "n = " << n << ", t = " << t << " sec\n";
   }
 
   for (int i = 0; i < n / commsize; i++) {
