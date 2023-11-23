@@ -7,11 +7,10 @@
 int n, rank, commsize;
 
 void get_matrix(double **a) {
-  // each proc gets equal amount of continuous rows
+  // each proc gets equal amount of continuous rows, last proc gets remaining
   for (int i = 0; i < n / commsize; i++) {
     for (int j = 0; j < n; j++) {
       // proc's n-th row = matrix's (i + rank * n / commsize)-th row
-      // 1 / (1 + i + rank * n / commsize + j)
       a[i][j] = std::min(n - j, n - i - rank * n / commsize);
     }
   }
@@ -38,9 +37,9 @@ void print_matrix(double **a) {
 
 // diagonalising matrix & getting inverse from connected matrix
 // transferring data between procs takes O(n) memspace
-// function zeroes k-th col except diagonal elem, choosing main elem for row
+// function zeroes k-th col except diagonal elem, choosing row's main elem
 int inverse_matrix(double **a, double **x, int k) {
-  // arrays for transferring data between procs
+  // for transferring data between procs
   double *ms = new double[n];
   double *mf = new double[n];
   // each proc inserts his diagonalised col values to ms, other = 0
@@ -68,15 +67,17 @@ int inverse_matrix(double **a, double **x, int k) {
   delete[] ms;
   delete[] mf;
 
-  // if main element is close to 0, matrix got no inverse
-  if (std::fabs(mf[M]) == 0) { // < 1e-7) {
+  // if main element is 0, matrix got no inverse
+  if (std::fabs(mf[M]) == 0) {
     return -1;
   }
 
-  int t1 = k / (n / commsize); // p w/ n-th row, n is diagonalised col number
-  int t2 = M / (n / commsize); // p w/ main elem
+  // t1 - proc with n-th row, n is diagonalised col number
+  // t2 - proc with main element
+  int t1 = k / (n / commsize);
+  int t2 = M / (n / commsize);
 
-  // new arrays for transferring data
+  // new transferring data
   double *s1 = new double[4 * n];
   double *s2 = new double[4 * n];
   for (int i = 0; i < 4 * n; i++) {
@@ -113,7 +114,7 @@ int inverse_matrix(double **a, double **x, int k) {
     s2[i + 2 * n] = s2[i + 2 * n] / c;
   }
 
-  // procs with main elem and diagonal elem swap rows
+  // procs with main and diagonal elements swap rows
   if (rank == t2) {
     for (int i = n; i < 2 * n; i++) {
       a[M - rank * n / commsize][i - n] = s2[i];
@@ -171,15 +172,12 @@ int main(int argc, char **argv) {
     }
   }
 
-  // get input matrix
   get_matrix(a);
-  // print_matrix(a);
 
   MPI_Barrier(MPI_COMM_WORLD);
   double t = -MPI_Wtime();
 
-  // find inverse matrix, diagonalise each col
-  for (int i = 0; i < n; i++) {
+  for (int i = 0; i < n; i++) { // find inverse matrix, diagonalise each col
     int result = inverse_matrix(a, x, i);
     if (result == -1) {
       std::cout << "No inverse matrix\n";
@@ -194,10 +192,6 @@ int main(int argc, char **argv) {
   }
 
   t += MPI_Wtime();
-
-  // MPI_Barrier(MPI_COMM_WORLD);
-  // print_matrix(x);
-  MPI_Barrier(MPI_COMM_WORLD);
   if (rank == 0) {
     std::cout << "n = " << n << ", t = " << t << " sec\n";
   }
