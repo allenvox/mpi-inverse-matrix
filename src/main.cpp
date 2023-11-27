@@ -193,7 +193,8 @@ int main(int argc, char **argv) {
 
   t += MPI_Wtime();
   if (rank == 0) {
-    std::cout << "n = " << n << ", t = " << t << " sec\n";
+    std::cout << "commsize = " << commsize << ", n = " << n << ", t = " << t
+              << " sec\n";
   }
 
   for (int i = 0; i < n / commsize; i++) {
