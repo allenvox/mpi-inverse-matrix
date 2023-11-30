@@ -4,10 +4,36 @@
 #include <iomanip>
 #include <iostream>
 
+const std::string prefix = "[inverse matrix] ";
+
 int n, rank, commsize;
 
-void get_matrix(double **a) {
-  // each proc gets equal amount of continuous rows, last proc gets remaining
+void get_chunk(int *lb, int *ub) {
+  int q = n / commsize;
+  if (n % commsize) q++;
+  int r = commsize * q - n;
+  /* Compute chunk size for the process */
+  int chunk = q;
+  if (rank >= commsize - r) chunk = q - 1;
+  *lb = a;        /* Determine start item for the process */
+  if (rank > 0) { /* Count sum of previous chunks */
+    if (rank <= commsize - r) {
+      *lb += q * rank;
+    } else {
+      *lb += q * (commsize - r) + (q - 1) * (rank - (commsize - r));
+    }
+  }
+  *ub = *lb + chunk - 1;
+  std::cout << prefix << "rank " << rank << ": lb = " << *lb << ", ub = " << *ub
+            << '\n';
+}
+
+double** get_matrix(double **a) {
+  int lb, ub;
+  get_chunk(&lb, &ub);
+  int nrows = ub - lb + 1;
+  double **a = new double *[nrows];
+
   for (int i = 0; i < n / commsize; i++) {
     for (int j = 0; j < n; j++) {
       // proc's n-th row = matrix's (i + rank * n / commsize)-th row
@@ -155,14 +181,13 @@ int main(int argc, char **argv) {
   }
 
   // each proc gets equal amount of rows
-  double **a = new double *[n / commsize];
-  double **x = new double *[n / commsize];
-  for (int i = 0; i < n / commsize; i++) {
-    a[i] = new double[n];
-    x[i] = new double[n];
-  }
+  int lb, ub;
+  get_chunk(&lb, &ub);
+  int nrows = ub - lb + 1;
+  double *a = (double *)malloc(sizeof(*a) * nrows * n);
+  double *x = (double *)malloc(sizeof(*x) * nrows * n);
   // each proc fills its chunk of connected matrix
-  for (int i = 0; i < n / commsize; i++) {
+  for (int i = 0; i < nrows; i++) {
     for (int j = 0; j < n; j++) {
       if (i + rank * n / commsize == j) {
         x[i][j] = 1.0;
