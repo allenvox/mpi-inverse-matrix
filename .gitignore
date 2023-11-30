@@ -60,3 +60,6 @@ bin
 
 ### VSCode ###
 .vscode/
+
+### Windows ###
+*.exe*
