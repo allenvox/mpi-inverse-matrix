@@ -76,49 +76,12 @@ void inverse_matrix(double **a, double **x, int k, int lb) {
   MPI_Allreduce(&local_data, &global_data, 1, MPI_DOUBLE_INT, MPI_MAXLOC, MPI_COMM_WORLD);
 
   if (global_data.value == 0.0) {
-    throw std::runtime_error(std::to_string(rank) + ": No inverse matrix\n");
+    throw std::runtime_error(std::to_string(rank) + " no inverse matrix");
   }
 
-  /*
-  // for transferring data between procs
-  double *ms = new double[n];
-  double *mf = new double[n];
-  // each proc inserts his diagonalised col values to ms, other = 0
-  for (int i = 0; i < n; i++) {
-    ms[i] = 0.0;
-  }
-  for (int i = rank * nrows; i < (rank + 1) * nrows; i++) {
-    ms[i] = a[i - rank * nrows][k];
-  }
-
-  // procs sum ms cols to mf col => mf = current col
-  MPI_Barrier(MPI_COMM_WORLD);
-  for (int i = 0; i < commsize; i++) {
-    MPI_Reduce(ms, mf, n, MPI_DOUBLE, MPI_SUM, i, MPI_COMM_WORLD);
-  }
-  MPI_Barrier(MPI_COMM_WORLD);
-
-  // find main element in col
-  int M = k;
-  for (int i = k + 1; i < n; i++) {
-    if (std::fabs(mf[i]) > std::fabs(mf[M])) {
-      M = i;
-    }
-  }
-  delete[] ms;
-  delete[] mf;
-
-  // if main element is 0, matrix got no inverse
-  if (std::fabs(mf[M]) == 0.0) {
-    return -1;
-  }
-   */
-
-  // t1 - proc with n-th row, n is diagonalised col number
-  // t2 - proc with main element
   int M = global_data.index;
-  int t1 = k / (nrows);
-  int t2 = M / (nrows);
+  int t1 = k / (nrows); // proc with n-th row, n is diagonalised col number
+  int t2 = M / (nrows); // proc with main elem
 
   // new transferring data
   double *s1 = new double[4 * n];
@@ -144,11 +107,9 @@ void inverse_matrix(double **a, double **x, int k, int lb) {
   }
 
   // sum all arrays to s2
-  MPI_Barrier(MPI_COMM_WORLD);
   for (int i = 0; i < commsize; i++) {
     MPI_Reduce(s1, s2, 4 * n, MPI_DOUBLE, MPI_SUM, i, MPI_COMM_WORLD);
   }
-  MPI_Barrier(MPI_COMM_WORLD);
 
   // all procs normalise row with main elem
   double c = s2[k];
@@ -218,7 +179,6 @@ int main(int argc, char **argv) {
     }
   }
 
-  MPI_Barrier(MPI_COMM_WORLD);
   double t = -MPI_Wtime();
 
   for (int i = 0; i < n; i++) { // find inverse matrix, diagonalise each col
