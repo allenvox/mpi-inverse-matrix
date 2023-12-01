@@ -1,3 +1,6 @@
+// Copyright 2023 Yuriy Grigoryev, allenvox.me
+// Licensed under the Apache License, Version 2.0 (the "LICENSE")
+
 #include <mpi.h>
 
 #include <cmath>
