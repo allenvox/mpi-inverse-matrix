@@ -8,14 +8,11 @@
 #include <iomanip>
 #include <iostream>
 
-using std::cout;
-
-int n = 1680, nrows, rank, commsize;
+int rank, commsize, lb, ub, nrows, n = 1680;
 
 void get_chunk(int *lb, int *ub) {
   int rows_per_process = n / commsize;
   int remaining_rows = n % commsize;
-  // Determine the lower and upper bounds for each process
   if (rank < remaining_rows) {
     *lb = rank * (rows_per_process + 1);
     *ub = *lb + rows_per_process;
@@ -23,20 +20,32 @@ void get_chunk(int *lb, int *ub) {
     *lb = remaining_rows * (rows_per_process + 1) + (rank - remaining_rows) * rows_per_process;
     *ub = *lb + rows_per_process - 1;
   }
-  cout << rank << ": lb = " << *lb << ", ub = " << *ub << '\n';
 }
 
-double* get_input_matrix() {
-  double *a = (double*)malloc(nrows * n * sizeof(double));
+int get_proc(int idx) {
+  int rows_per_process = n / commsize;
+  int remaining_rows = n % commsize;
+  int threshold = remaining_rows * (rows_per_process + 1);
+  if (idx < threshold) {
+    // Index falls in the range of processes with an extra row
+    return idx / (rows_per_process + 1);
+  } else {
+    // Index falls in the range of processes without an extra row
+    return remaining_rows + (idx - threshold) / rows_per_process;
+  }
+}
+
+double *get_input_matrix() {
+  double *matrix = (double*)malloc(nrows * n * sizeof(double));
   for (int i = 0; i < nrows; i++) {
     for (int j = 0; j < n; j++) {
-      a[i * n + j] = std::min(n - j, n - i - rank * nrows);
+      matrix[i * n + j] = std::min(n - j, n - i - rank * nrows);
     }
   }
-  return a;
+  return matrix;
 }
 
-double* get_connected_matrix() {
+double *get_connected_matrix() {
   double *x = (double*)malloc(nrows * n * sizeof(double));
   for (int i = 0; i < nrows; i++) {
     for (int j = 0; j < n; j++) {
@@ -50,124 +59,131 @@ double* get_connected_matrix() {
   return x;
 }
 
-// diagonalising matrix & getting inverse from connected matrix
-// transferring data between procs takes O(n) memspace
-// function zeroes k-th col except diagonal elem, choosing row's main elem
-void inverse_matrix(double *a, double *x, int k, int lb) {
+// Function for zeroing cur_col in A & leaving diagonal with 1
+// All operations are duplicated to X
+void inverse_matrix(double *a, double *x, int cur_col) {
+  // Getting local maximum in cur_col
   double local_max = 0.0;
   int local_index = -1;
   for (int i = 0; i < nrows; i++) {
     int global_index = i + lb;
-    if (global_index >= k && std::fabs(a[i * n + k]) > local_max) {
-      local_max = std::fabs(a[i * n + k]);
+    if (global_index >= cur_col && std::fabs(a[i * n + cur_col]) > local_max) {
+      local_max = std::fabs(a[i * n + cur_col]);
       local_index = global_index;
     }
   }
 
-  // определения глобального максимума и его индекса
+  // Getting global maximum
   struct {
     double value;
     int index;
   } local_data = {local_max, local_index}, global_data;
-
   MPI_Allreduce(&local_data, &global_data, 1, MPI_DOUBLE_INT, MPI_MAXLOC, MPI_COMM_WORLD);
 
-  if (global_data.value == 0.0) { // if global max is 0
-    std::cerr << std::to_string(rank) << " no inverse matrix\n";
+  // If global cur_col maximum is 0, matrix is singular and non-invertible
+  if (global_data.value == 0.0) {
+    std::cerr << "No inverse matrix\n";
   }
 
-  int M = global_data.index;
-  int t1 = k / (nrows); // proc with n-th row, n is diagonalised col number
-  int t2 = M / (nrows); // proc with main elem
+  // Calculating processes with diagonalised col & main element
+  int diag_p = get_proc(cur_col);
+  int main_p = get_proc(global_data.index);
 
-  // new transferring data
-  double *s1 = new double[4 * n];
-  double *s2 = new double[4 * n];
-  for (int i = 0; i < 4 * n; i++) {
+  // Create & fill array for transferring data
+  double *s1 = (double*)malloc(n * 4 * sizeof(double));
+  for (int i = 0; i < n * 4; i++) {
     s1[i] = 0.0;
   }
 
-  // proc with diagonal element puts needed rows to arrays
-  if (rank == t1) {
-    for (int i = n; i < 2 * n; i++) {
-      s1[i] = a[(k - rank * nrows) * n + i - n];
-      s1[i + 2 * n] = x[(k - rank * nrows) * n + i - n];
+  // Process with diagonal element puts needed rows to s1
+  if (rank == diag_p) {
+    for (int i = n; i < n * 2; ++i) {
+      s1[i] = a[(cur_col - rank * nrows) * n + i - n];
+      s1[i + n * 2] = x[(cur_col - rank * nrows) * n + i - n];
     }
   }
 
-  // proc with main elem puts needed rows to arrays
-  if (rank == t2) {
-    for (int i = 0; i < n; i++) {
-      s1[i] = a[(M - rank * nrows) * n + i];
-      s1[i + 2 * n] = x[(M - rank * nrows) * n + i];
+  // Process with main element puts needed rows to s1
+  if (rank == main_p) {
+    for (int i = 0; i < n; ++i) {
+      s1[i] = a[(global_data.index - rank * nrows) * n + i];
+      s1[i + n * 2] = x[(global_data.index - rank * nrows) * n + i];
     }
   }
 
-  // sum all arrays to s2
-  for (int i = 0; i < commsize; i++) {
-    MPI_Reduce(s1, s2, 4 * n, MPI_DOUBLE, MPI_SUM, i, MPI_COMM_WORLD);
+  // Reduce s1 arrays to s2
+  double *s2 = (double*)malloc(n * 4 * sizeof(double));
+  for (int i = 0; i < commsize; ++i) {
+    MPI_Reduce(s1, s2, n * 4, MPI_DOUBLE, MPI_SUM, i, MPI_COMM_WORLD);
   }
 
-  // all procs normalise row with main elem
-  double c = s2[k];
+  // All processes normalise row with main elem
+  double c = s2[cur_col];
   for (int i = 0; i < n; i++) {
     s2[i] = s2[i] / c;
-    s2[i + 2 * n] = s2[i + 2 * n] / c;
+    s2[i + n * 2] = s2[i + n * 2] / c;
   }
 
-  // procs with main and diagonal elements swap rows
-  if (rank == t2) {
-    for (int i = n; i < 2 * n; i++) {
-      a[(M - rank * nrows) * n + i - n] = s2[i];
-      x[(M - rank * nrows) * n + i - n] = s2[i + 2 * n];
+  // Processes with main and diagonal elements swap rows
+  if (rank == main_p) {
+    for (int i = n; i < n * 2; i++) {
+      a[(global_data.index - rank * nrows) * n + i - n] = s2[i];
+      x[(global_data.index - rank * nrows) * n + i - n] = s2[i + n * 2];
     }
   }
-  if (rank == t1) {
+  if (rank == diag_p) {
     for (int i = 0; i < n; i++) {
-      a[(k - rank * nrows) * n + i] = s2[i];
-      x[(k - rank * nrows) * n + i] = s2[i + 2 * n];
+      a[(cur_col - rank * nrows) * n + i] = s2[i];
+      x[(cur_col - rank * nrows) * n + i] = s2[i + n * 2];
     }
   }
 
-  // all procs subtract diagonal row from their rows
-  // (zeroing working col except diagonal elem)
+  // All processes subtract diagonal row from their rows, zeroing cur_col
+  // (except diagonal)
   for (int i = 0; i < nrows; i++) {
-    if (i + rank * nrows != k) {
-      c = a[i * n + k];
+    if (i + rank * nrows != cur_col) {
+      c = a[i * n + cur_col];
       for (int j = 0; j < n; j++) {
         a[i * n + j] = a[i * n + j] - s2[j] * c;
-        x[i * n + j] = x[i * n + j] - s2[j + 2 * n] * c;
+        x[i * n + j] = x[i * n + j] - s2[j + n * 2] * c;
       }
     }
   }
-  delete[] s1;
-  delete[] s2;
+
+  free(s1);
+  free(s2);
 }
 
 int main(int argc, char **argv) {
   double t = -MPI_Wtime();
+
+  int commsize, rank;
   MPI_Init(&argc, &argv);
   MPI_Comm_size(MPI_COMM_WORLD, &commsize);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+
   if (argc > 1) {
     n = std::atoi(argv[1]);
   }
 
-  int lb, ub;
+  // Get lower & upper bounds for this process, calculate number of local rows
   get_chunk(&lb, &ub);
   nrows = ub - lb + 1;
 
   double *a = get_input_matrix();
   double *x = get_connected_matrix();
 
-  //double t = -MPI_Wtime();
+  // Perform operations with i-th col
   for (int i = 0; i < n; ++i) {
-    inverse_matrix(a, x, i, lb);
+    inverse_matrix(a, x, i);
   }
+
   t += MPI_Wtime();
 
   MPI_Barrier(MPI_COMM_WORLD);
-  cout << commsize << " procs, n = " << n << ", t = " << t << " sec\n";
+  if (rank == 0) {
+    std::cout << commsize << " procs, n = " << n << ", t = " << t << " sec\n";
+  }
 
   free(a);
   free(x);
