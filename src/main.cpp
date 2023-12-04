@@ -129,9 +129,7 @@ bool inverse_matrix(double *a, double *x, int cur_col) {
 
   // Reduce s1 arrays to s2
   double *s2 = (double*)malloc(n * 4 * sizeof(double));
-  for (int i = 0; i < commsize; ++i) {
-    MPI_Reduce(s1, s2, n * 4, MPI_DOUBLE, MPI_SUM, i, MPI_COMM_WORLD);
-  }
+  MPI_Allreduce(s1, s2, n * 4, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
   if (rank == deb) {
     std::cerr << 6 << '\n';
   }
@@ -208,7 +206,7 @@ int main(int argc, char **argv) {
     }
   }
 
-  ///
+  /*
   double *recvbuf = nullptr; // buf for entire inverse matrix on proc 0
   int *recvcounts = (int*)malloc(commsize * sizeof(int));
   int *displs = (int*)malloc(commsize * sizeof(int));
@@ -217,7 +215,7 @@ int main(int argc, char **argv) {
     recvbuf = (double*)malloc(n * n * sizeof(double));
     for (int i = 0; i < commsize; ++i) { // fill recvcounts & displs
       int l, u;
-      get_chunk(i, commsize, n, &l, &u);
+      get_chunk(&l, &u);
       recvcounts[i] = (u - l + 1) * n;
       displs[i] = l * n;
     }
@@ -233,7 +231,7 @@ int main(int argc, char **argv) {
   if (rank == 0) {
     free(recvbuf);
   }
-  ///
+  */
   
   t += MPI_Wtime();
 
