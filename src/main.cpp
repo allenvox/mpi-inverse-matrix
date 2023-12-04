@@ -8,6 +8,7 @@
 #include <iomanip>
 #include <iostream>
 
+// Global variables
 int rank, commsize, lb, ub, nrows, n = 1680;
 
 void get_chunk(int *l, int *u) {
@@ -59,37 +60,35 @@ double *get_connected_matrix() {
   return x;
 }
 
-// Function for zeroing cur_col in A & leaving diagonal with 1
-// All operations are duplicated to X
+// Function for zeroing cur_col in matrix A & leaving diagonal with 1
+// All operations are duplicated to matrix X
 bool inverse_matrix(double *a, double *x, int cur_col) {
   // Getting local maximum in cur_col
   double local_max = 0.0;
   int local_index = -1;
   for (int i = 0; i < nrows; i++) {
     int global_index = i + lb;
-    if (global_index >= cur_col && std::fabs(a[i * n + cur_col]) > local_max) {
-      local_max = std::fabs(a[i * n + cur_col]);
-      local_index = global_index;
+    if (global_index >= cur_col) {
+      double value = std::fabs(a[i * n + cur_col]);
+      if (value > local_max) {
+        local_max = value;
+        local_index = global_index;
+      }
     }
   }
-  int deb = 1; // n = 13
-  if (rank == deb) {
-    std::cerr << 1 << '\n';
-  }
 
-  // Getting global maximum
+  // Struct for sending (local) & receiving (global) maximums from processes
   struct {
     double value;
     int index;
   } local_data = {local_max, local_index}, global_data;
+
+  // Getting global maximum
   MPI_Allreduce(&local_data, &global_data, 1, MPI_DOUBLE_INT, MPI_MAXLOC, MPI_COMM_WORLD);
 
   // If global cur_col maximum is 0, matrix is singular and non-invertible
   if (global_data.value == 0.0) {
     return false;
-  }
-  if (rank == deb) {
-    std::cerr << 2 << '\n';
   }
 
   // Calculating processes with diagonalised col & main element
@@ -101,47 +100,32 @@ bool inverse_matrix(double *a, double *x, int cur_col) {
   for (int i = 0; i < n * 4; i++) {
     s1[i] = 0.0;
   }
-  if (rank == deb) {
-    std::cerr << 3 << '\n';
-  }
 
-  // Process with diagonal element puts needed rows to s1
+  // Process diag_p puts needed rows to s1
   if (rank == diag_p) {
     for (int i = n; i < n * 2; ++i) {
       s1[i] = a[(cur_col - rank * nrows) * n + i - n];
       s1[i + n * 2] = x[(cur_col - rank * nrows) * n + i - n];
     }
   }
-  if (rank == deb) {
-    std::cerr << 4 << '\n';
-  }
 
-  // Process with main element puts needed rows to s1
+  // Process main_p puts needed rows to s1
   if (rank == main_p) {
     for (int i = 0; i < n; ++i) {
       s1[i] = a[(global_data.index - rank * nrows) * n + i];
       s1[i + n * 2] = x[(global_data.index - rank * nrows) * n + i];
     }
   }
-  if (rank == deb) {
-    std::cerr << 5 << '\n';
-  }
 
   // Reduce s1 arrays to s2
   double *s2 = (double*)malloc(n * 4 * sizeof(double));
   MPI_Allreduce(s1, s2, n * 4, MPI_DOUBLE, MPI_SUM, MPI_COMM_WORLD);
-  if (rank == deb) {
-    std::cerr << 6 << '\n';
-  }
 
   // All processes normalise row with main elem
   double c = s2[cur_col];
   for (int i = 0; i < n; i++) {
     s2[i] = s2[i] / c;
     s2[i + n * 2] = s2[i + n * 2] / c;
-  }
-  if (rank == deb) {
-    std::cerr << 7 << '\n';
   }
 
   // Processes with main and diagonal elements swap rows
@@ -151,14 +135,12 @@ bool inverse_matrix(double *a, double *x, int cur_col) {
       x[(global_data.index - rank * nrows) * n + i - n] = s2[i + n * 2];
     }
   }
+
   if (rank == diag_p) {
     for (int i = 0; i < n; i++) {
       a[(cur_col - rank * nrows) * n + i] = s2[i];
       x[(cur_col - rank * nrows) * n + i] = s2[i + n * 2];
     }
-  }
-  if (rank == deb) {
-    std::cerr << 8 << '\n';
   }
 
   // All processes subtract diagonal row from their rows, zeroing cur_col
@@ -173,6 +155,7 @@ bool inverse_matrix(double *a, double *x, int cur_col) {
     }
   }
 
+  // Free up resources used for transferring data
   free(s1);
   free(s2);
 
@@ -180,8 +163,10 @@ bool inverse_matrix(double *a, double *x, int cur_col) {
 }
 
 int main(int argc, char **argv) {
+  // Start measuring time
   double t = -MPI_Wtime();
 
+  // Initialize MPI
   MPI_Init(&argc, &argv);
   MPI_Comm_size(MPI_COMM_WORLD, &commsize);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -194,11 +179,11 @@ int main(int argc, char **argv) {
   get_chunk(&lb, &ub);
   nrows = ub - lb + 1;
 
+  // Get matrices A and I (X after performing inversion operations)
   double *a = get_input_matrix();
   double *x = get_connected_matrix();
 
   // Perform operations with i-th col
-  // todo fix segfault if n is odd
   for (int i = 0; i < n; ++i) {
     if (!inverse_matrix(a, x, i)) {
       std::cerr << "No inverse matrix\n";
@@ -206,14 +191,13 @@ int main(int argc, char **argv) {
     }
   }
 
-  /*
-  double *recvbuf = nullptr; // buf for entire inverse matrix on proc 0
+  // Fill receive counts and displacements for all procs
+  double *recvbuf = nullptr;
   int *recvcounts = (int*)malloc(commsize * sizeof(int));
   int *displs = (int*)malloc(commsize * sizeof(int));
-
   if (rank == 0) {
     recvbuf = (double*)malloc(n * n * sizeof(double));
-    for (int i = 0; i < commsize; ++i) { // fill recvcounts & displs
+    for (int i = 0; i < commsize; ++i) {
       int l, u;
       get_chunk(&l, &u);
       recvcounts[i] = (u - l + 1) * n;
@@ -221,27 +205,27 @@ int main(int argc, char **argv) {
     }
   }
 
-  // gather all parts of inverse matrix to proc 0
+  // Gathering all parts of inverse matrix on proc 0
   MPI_Gatherv(a, nrows * n, MPI_DOUBLE, recvbuf, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD);
 
-  // here recvbuf contains entire inverse matrix, do whatever we want with it
-
-  free(recvcounts);
-  free(displs);
-  if (rank == 0) {
-    free(recvbuf);
-  }
-  */
-  
+  // End measuring time
   t += MPI_Wtime();
+
+  // Here receive buffer on proc 0 contains entire inverse matrix
 
   MPI_Barrier(MPI_COMM_WORLD);
   if (rank == 0) {
     std::cout << commsize << " procs, n = " << n << ", t = " << t << " sec\n";
   }
 
+  // Free up allocated memory, finalize
   free(a);
   free(x);
+  free(recvcounts);
+  free(displs);
+  if (rank == 0) {
+    free(recvbuf);
+  }
   MPI_Finalize();
   return 0;
 }
