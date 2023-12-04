@@ -61,7 +61,7 @@ double *get_connected_matrix() {
 
 // Function for zeroing cur_col in A & leaving diagonal with 1
 // All operations are duplicated to X
-void inverse_matrix(double *a, double *x, int cur_col) {
+bool inverse_matrix(double *a, double *x, int cur_col) {
   // Getting local maximum in cur_col
   double local_max = 0.0;
   int local_index = -1;
@@ -86,7 +86,7 @@ void inverse_matrix(double *a, double *x, int cur_col) {
 
   // If global cur_col maximum is 0, matrix is singular and non-invertible
   if (global_data.value == 0.0) {
-    std::cerr << "No inverse matrix\n";
+    return false;
   }
   if (rank == deb) {
     std::cerr << 2 << '\n';
@@ -177,6 +177,8 @@ void inverse_matrix(double *a, double *x, int cur_col) {
 
   free(s1);
   free(s2);
+
+  return true;
 }
 
 int main(int argc, char **argv) {
@@ -200,9 +202,39 @@ int main(int argc, char **argv) {
   // Perform operations with i-th col
   // todo fix segfault if n is odd
   for (int i = 0; i < n; ++i) {
-    inverse_matrix(a, x, i);
+    if (!inverse_matrix(a, x, i)) {
+      std::cerr << "No inverse matrix\n";
+      return 1;
+    }
   }
 
+  ///
+  double *recvbuf = nullptr; // buf for entire inverse matrix on proc 0
+  int *recvcounts = (int*)malloc(commsize * sizeof(int));
+  int *displs = (int*)malloc(commsize * sizeof(int));
+
+  if (rank == 0) {
+    recvbuf = (double*)malloc(n * n * sizeof(double));
+    for (int i = 0; i < commsize; ++i) { // fill recvcounts & displs
+      int l, u;
+      get_chunk(i, commsize, n, &l, &u);
+      recvcounts[i] = (u - l + 1) * n;
+      displs[i] = l * n;
+    }
+  }
+
+  // gather all parts of inverse matrix to proc 0
+  MPI_Gatherv(a, nrows * n, MPI_DOUBLE, recvbuf, recvcounts, displs, MPI_DOUBLE, 0, MPI_COMM_WORLD);
+
+  // here recvbuf contains entire inverse matrix, do whatever we want with it
+
+  free(recvcounts);
+  free(displs);
+  if (rank == 0) {
+    free(recvbuf);
+  }
+  ///
+  
   t += MPI_Wtime();
 
   MPI_Barrier(MPI_COMM_WORLD);
