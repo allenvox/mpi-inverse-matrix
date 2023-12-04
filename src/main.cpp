@@ -213,7 +213,6 @@ int main(int argc, char **argv) {
 
   // Here receive buffer on proc 0 contains entire inverse matrix
 
-  MPI_Barrier(MPI_COMM_WORLD);
   if (rank == 0) {
     std::cout << commsize << " procs, n = " << n << ", t = " << t << " sec\n";
   }
