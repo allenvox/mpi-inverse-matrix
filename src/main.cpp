@@ -10,15 +10,15 @@
 
 int rank, commsize, lb, ub, nrows, n = 1680;
 
-void get_chunk(int *lb, int *ub) {
+void get_chunk(int *l, int *u) {
   int rows_per_process = n / commsize;
   int remaining_rows = n % commsize;
   if (rank < remaining_rows) {
-    *lb = rank * (rows_per_process + 1);
-    *ub = *lb + rows_per_process;
+    *l = rank * (rows_per_process + 1);
+    *u = *l + rows_per_process;
   } else {
-    *lb = remaining_rows * (rows_per_process + 1) + (rank - remaining_rows) * rows_per_process;
-    *ub = *lb + rows_per_process - 1;
+    *l = remaining_rows * (rows_per_process + 1) + (rank - remaining_rows) * rows_per_process;
+    *u = *l + rows_per_process - 1;
   }
 }
 
@@ -72,6 +72,10 @@ void inverse_matrix(double *a, double *x, int cur_col) {
       local_index = global_index;
     }
   }
+  int deb = 1; // n = 13
+  if (rank == deb) {
+    std::cerr << 1 << '\n';
+  }
 
   // Getting global maximum
   struct {
@@ -84,6 +88,9 @@ void inverse_matrix(double *a, double *x, int cur_col) {
   if (global_data.value == 0.0) {
     std::cerr << "No inverse matrix\n";
   }
+  if (rank == deb) {
+    std::cerr << 2 << '\n';
+  }
 
   // Calculating processes with diagonalised col & main element
   int diag_p = get_proc(cur_col);
@@ -94,6 +101,9 @@ void inverse_matrix(double *a, double *x, int cur_col) {
   for (int i = 0; i < n * 4; i++) {
     s1[i] = 0.0;
   }
+  if (rank == deb) {
+    std::cerr << 3 << '\n';
+  }
 
   // Process with diagonal element puts needed rows to s1
   if (rank == diag_p) {
@@ -101,6 +111,9 @@ void inverse_matrix(double *a, double *x, int cur_col) {
       s1[i] = a[(cur_col - rank * nrows) * n + i - n];
       s1[i + n * 2] = x[(cur_col - rank * nrows) * n + i - n];
     }
+  }
+  if (rank == deb) {
+    std::cerr << 4 << '\n';
   }
 
   // Process with main element puts needed rows to s1
@@ -110,11 +123,17 @@ void inverse_matrix(double *a, double *x, int cur_col) {
       s1[i + n * 2] = x[(global_data.index - rank * nrows) * n + i];
     }
   }
+  if (rank == deb) {
+    std::cerr << 5 << '\n';
+  }
 
   // Reduce s1 arrays to s2
   double *s2 = (double*)malloc(n * 4 * sizeof(double));
   for (int i = 0; i < commsize; ++i) {
     MPI_Reduce(s1, s2, n * 4, MPI_DOUBLE, MPI_SUM, i, MPI_COMM_WORLD);
+  }
+  if (rank == deb) {
+    std::cerr << 6 << '\n';
   }
 
   // All processes normalise row with main elem
@@ -122,6 +141,9 @@ void inverse_matrix(double *a, double *x, int cur_col) {
   for (int i = 0; i < n; i++) {
     s2[i] = s2[i] / c;
     s2[i + n * 2] = s2[i + n * 2] / c;
+  }
+  if (rank == deb) {
+    std::cerr << 7 << '\n';
   }
 
   // Processes with main and diagonal elements swap rows
@@ -136,6 +158,9 @@ void inverse_matrix(double *a, double *x, int cur_col) {
       a[(cur_col - rank * nrows) * n + i] = s2[i];
       x[(cur_col - rank * nrows) * n + i] = s2[i + n * 2];
     }
+  }
+  if (rank == deb) {
+    std::cerr << 8 << '\n';
   }
 
   // All processes subtract diagonal row from their rows, zeroing cur_col
@@ -157,7 +182,6 @@ void inverse_matrix(double *a, double *x, int cur_col) {
 int main(int argc, char **argv) {
   double t = -MPI_Wtime();
 
-  int commsize, rank;
   MPI_Init(&argc, &argv);
   MPI_Comm_size(MPI_COMM_WORLD, &commsize);
   MPI_Comm_rank(MPI_COMM_WORLD, &rank);
@@ -174,6 +198,7 @@ int main(int argc, char **argv) {
   double *x = get_connected_matrix();
 
   // Perform operations with i-th col
+  // todo fix segfault if n is odd
   for (int i = 0; i < n; ++i) {
     inverse_matrix(a, x, i);
   }
