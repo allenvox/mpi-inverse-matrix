@@ -14,7 +14,7 @@ def draw(filenames, labels, dest_filename):
     fig = plt.figure(figsize = (10 * cm, 7 * cm))
     ax = fig.add_subplot(111)
     ax.set_title("")
-    ax.set(xlabel = "Number of processes", ylabel = "Speedup")
+    ax.set(xlabel = "Количество процессов", ylabel = "Ускорение")
     ax.label_outer()
     ax.xaxis.set_ticks(np.arange(0, 17, 2))
     #ax.yaxis.set_ticks(np.arange(1.8, 9, 1))
@@ -49,4 +49,4 @@ def draw(filenames, labels, dest_filename):
     fig.savefig(dest_filename, dpi = 300)
 
 if __name__ == "__main__":
-    draw(["gauss_1500.dat", "gauss_5000.dat", "linear.dat"], ["N = 1500", "N = 5000", "Linear speedup"], "chart.png")
+    draw(["gauss_1500.dat", "gauss_5000.dat", "linear.dat"], ["N = 1500", "N = 5000", "Линейное ускорение"], "chart.png")
